@@ -17,8 +17,14 @@ This Ansible playbook automates the setup of SSH key authentication on Linux tar
     cd ansible-ssh-setup
     ```
 2. Update the ansible-vault file `group_vars/credentials` with your configuration.
+ ```bash
+ansible-vault create group_vars/credentials
+ansible-vault view  group_vars/credentials
+ansible_user: root
+ssh_user: automation
+ ```
 
-3. Create the  `exported_keys` directory:
+4. Create the  `exported_keys` directory:
    ```bash
     mkdir exported_keys
     ```
