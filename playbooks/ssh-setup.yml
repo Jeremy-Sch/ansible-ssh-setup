@@ -182,11 +182,11 @@
       line: 'Banner /etc/issue'
       state: present
 
-  #- name: Change SSH port
-    #lineinfile:
-      #path: /etc/ssh/sshd_config
-      #regexp: '^Port 22'
-      #line: 'Port {{ ssh_port }}'
+  - name: Change SSH port
+    lineinfile:
+      path: /etc/ssh/sshd_config
+      regexp: '^Port'
+      line: 'Port {{ ssh_port }}'
   
   - name: Update the ssh configuration
     become: true
@@ -194,7 +194,8 @@
       path: /etc/ssh/sshd_config
       block: |
         Match User {{ ssh_user }}
-        PasswordAuthentication no
+          PasswordAuthentication no
+        Match all
       backup: yes
       validate: /usr/sbin/sshd -T -f %s
     register: sshd_config
@@ -207,3 +208,5 @@
       state: restarted
     when: 
       - sshd_config.changed
+      - ansible_facts['os_family'] == "Debian" or ansible_facts['os_family'] == "RedHat"
+ 
