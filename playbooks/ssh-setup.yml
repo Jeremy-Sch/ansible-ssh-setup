@@ -1,0 +1,209 @@
+---
+- name: Setup SSH Key Authentication on Linux targets
+  hosts: "*"
+  gather_facts: true
+  vars_files:
+    - ../group_vars/credentials
+
+  tasks:
+  - name: Generate an OpenSSH keypair
+    community.crypto.openssh_keypair:
+      path: "../exported_keys/{{ inventory_hostname }}_{{ ssh_user }}_key"
+      type: ed25519
+      comment: "{{ inventory_hostname }}"
+    register: generated_key
+    delegate_to: localhost
+
+  - name: Get the path to the generated SSH private key file
+    debug:
+      msg: "{{ generated_key.filename }}"
+    when: generated_key.filename is defined
+
+  - name: Create the user {{ ssh_user }} 
+    become: true 
+    user:
+      name: "{{ ssh_user }}"
+      state: present
+      createhome: yes
+
+  - name: Add the user {{ ssh_user }} to the sudo group
+    become: true
+    user:
+      name: "{{ ssh_user }}"
+      groups: sudo
+
+  - name: Add the user {{ ssh_user }} to the sudoers file
+    lineinfile:
+      dest: /etc/sudoers
+      line: '{{ ssh_user }} ALL=(ALL) NOPASSWD:ALL'
+      validate: 'visudo -cf %s'
+
+
+  - name: Disable password authentication for the user {{ ssh_user }}
+    become: true
+    user:
+      name: "{{ ssh_user }}"
+      password_lock: true
+  
+  - name: Read the content of the authorized_keys file of the user {{ ssh_user }}
+    become: true
+    slurp:
+      src: "/home/{{ ssh_user }}/.ssh/authorized_keys"
+    ignore_errors: yes 
+    register: authorized_keys_content
+   
+  - name: Create the .ssh directory for the user {{ ssh_user }}
+    become: true
+    file:
+      path: "/home/{{ ssh_user }}/.ssh"
+      state: directory
+      mode: '0700'
+      owner: "{{ ssh_user }}"
+      group: "{{ ssh_user }}"
+    when: authorized_keys_content['content'] is not defined
+
+  - name: Create the authorized_keys file for the user {{ ssh_user }}
+    become: true 
+    file:
+      path: /home/{{ ssh_user }}/.ssh/authorized_keys
+      state: touch
+      mode: '0600'
+      owner: "{{ ssh_user }}"
+    when: authorized_keys_content['content'] is not defined
+
+  - name: Display the content of the authorized_keys file of the user {{ ssh_user }}
+    debug:
+      msg: "{{ authorized_keys_content['content'] | b64decode }}"
+    when: authorized_keys_content['content'] is defined
+      
+  - name: Add the public key to the authorized_keys file of the user {{ ssh_user }}
+    become: true
+    authorized_key:
+      user: "{{ ssh_user }}"
+      key: "{{ generated_key.public_key }}"
+      comment: "{{ generated_key.comment }}"
+      state: present
+      manage_dir: yes
+  
+  - name: Ensure SSH protocol is set to 2
+    lineinfile:
+      path: /etc/ssh/sshd_config
+      regexp: '^Protocol'
+      line: 'Protocol 2'
+      state: present
+
+  - name: Ensure SSH LogLevel is set to INFO
+    lineinfile:
+      path: /etc/ssh/sshd_config
+      regexp: '^LogLevel'
+      line: 'LogLevel INFO'
+      state: present
+
+
+  - name: Disable X11 forwarding
+    lineinfile:
+      path: /etc/ssh/sshd_config
+      regexp: '^X11Forwarding'
+      line: 'X11Forwarding no'
+      state: present
+
+  - name: Disable empty passwords
+    lineinfile:
+      path: /etc/ssh/sshd_config
+      regexp: '^PermitEmptyPasswords'
+      line: 'PermitEmptyPasswords no'
+      state: present
+
+  - name: Disable TCP forwarding
+    lineinfile:
+      path: /etc/ssh/sshd_config
+      regexp: '^AllowTcpForwarding'
+      line: 'AllowTcpForwarding no'
+      state: present
+
+  - name: Disable SSH access for users in group nologin
+    lineinfile:
+      path: /etc/ssh/sshd_config
+      regexp: '^DenyGroups'
+      line: 'DenyGroups nologin'
+      state: present
+
+  - name: Disable SSH access for users in group shutdown
+    lineinfile:
+      path: /etc/ssh/sshd_config
+      regexp: '^DenyGroups'
+      line: 'DenyGroups shutdown'
+      state: present
+
+  - name: Increase SSH idle timeout interval
+    lineinfile:
+      path: /etc/ssh/sshd_config
+      regexp: '^ClientAliveInterval'
+      line: 'ClientAliveInterval 600'
+      state: present
+
+  - name: Increase SSH login grace time
+    lineinfile:
+      path: /etc/ssh/sshd_config
+      regexp: '^LoginGraceTime'
+      line: 'LoginGraceTime 60'
+      state: present
+
+  - name: Set SSH MaxAuthTries to 4
+    lineinfile:
+      path: /etc/ssh/sshd_config
+      regexp: '^MaxAuthTries'
+      line: 'MaxAuthTries 4'
+      state: present
+
+  - name: Set SSH MaxSessions to 4
+    lineinfile:
+      path: /etc/ssh/sshd_config
+      regexp: '^MaxSessions'
+      line: 'MaxSessions 4'
+      state: present
+
+  - name: Ensure SSH HostbasedAuthentication is disabled
+    lineinfile:
+      path: /etc/ssh/sshd_config
+      regexp: '^HostbasedAuthentication'
+      line: 'HostbasedAuthentication no'
+      state: present
+
+  - name: Define SSH banner
+    lineinfile:
+      path: /etc/issue
+      line: "This service is restricted to INFRES.LAB administrators only."
+
+  - name: Set SSH banner
+    lineinfile:
+      path: /etc/ssh/sshd_config
+      regexp: '^Banner'
+      line: 'Banner /etc/issue'
+      state: present
+
+  #- name: Change SSH port
+    #lineinfile:
+      #path: /etc/ssh/sshd_config
+      #regexp: '^Port 22'
+      #line: 'Port {{ ssh_port }}'
+  
+  - name: Update the ssh configuration
+    become: true
+    blockinfile:
+      path: /etc/ssh/sshd_config
+      block: |
+        Match User {{ ssh_user }}
+        PasswordAuthentication no
+      backup: yes
+      validate: /usr/sbin/sshd -T -f %s
+    register: sshd_config
+    changed_when: sshd_config.changed
+
+  - name: Reload the ssh service 
+    become: true
+    service:
+      name: sshd
+      state: restarted
+    when: 
+      - sshd_config.changed
