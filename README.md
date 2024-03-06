@@ -6,7 +6,7 @@ This Ansible playbook automates the setup of SSH key authentication on Linux tar
 - Ansible installed on the control machine.
 - Inventory file (`hosts`) properly configured with target hosts.
 - `group_vars/credentials` file containing necessary variables.
-- `exported_keys` directory shoud exist.
+- `exported_keys` directory should exist.
 
 ## Usage
 1. Clone the repository:
